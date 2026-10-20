@@ -127,8 +127,10 @@ export function gitbash(options?: Options, bin?: string) {
   if (options?.gitbash) return options.gitbash
   const git = findExecutable("git", bin)
   if (!git) return
-  const file = path.join(git, "..", "..", "bin", "bash.exe")
-  if (stat(file)?.size) return file
+  // Git Bash puts mingw64/bin/git.exe on PATH instead of cmd/git.exe.
+  return [path.join(git, "..", "..", "bin", "bash.exe"), path.join(git, "..", "..", "..", "bin", "bash.exe")].find(
+    (file) => stat(file)?.size,
+  )
 }
 
 function fallback(bin?: string) {

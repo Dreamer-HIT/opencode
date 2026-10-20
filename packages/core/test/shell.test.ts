@@ -79,6 +79,39 @@ describe("shell", () => {
   }
 
   if (process.platform === "win32") {
+    test.each(["cmd", "bin", "mingw64/bin", "mingw32/bin"])("detects Git Bash with git.exe in %s", async (dir) => {
+      await using directory = await tmpdir()
+      const git = path.join(directory.path, "Git", dir, "git.exe")
+      const bash = path.join(directory.path, "Git", "bin", "bash.exe")
+      const wsl = path.join(directory.path, "System32", "bash.exe")
+      await Promise.all(
+        [git, bash, wsl].map(async (file) => {
+          await fs.mkdir(path.dirname(file), { recursive: true })
+          await Bun.write(file, "executable")
+        }),
+      )
+      const prev = process.env.PATH
+      process.env.PATH = [path.dirname(git), path.dirname(wsl)].join(path.delimiter)
+      try {
+        expect(ShellSelect.gitbash()).toBe(bash)
+        expect((await ShellSelect.list()).map((shell) => shell.path)).toContain(bash)
+        for (const shell of ["/usr/bin/bash", "bash"]) {
+          await withShell(shell, async () => {
+            expect(ShellSelect.resolve({ priority: "compat" })).toBe(bash)
+            expect(ShellSelect.resolve({ priority: "config" })).toBe(bash)
+            expect(ShellSelect.resolve({ priority: "compat" }, "bash")).toBe(bash)
+            expect(ShellSelect.resolve({ priority: "config" }, "bash")).toBe(bash)
+          })
+        }
+        expect(ShellSelect.gitbash({ gitbash: wsl })).toBe(wsl)
+        await fs.unlink(bash)
+        expect(ShellSelect.gitbash()).toBeUndefined()
+      } finally {
+        if (prev === undefined) delete process.env.PATH
+        else process.env.PATH = prev
+      }
+    })
+
     test("rejects blacklisted shells case-insensitively", async () => {
       await withShell("NU.EXE", async () => {
         expect(ShellSelect.name(ShellSelect.resolve({ priority: "compat" }))).not.toBe("nu")
@@ -86,7 +119,11 @@ describe("shell", () => {
     })
 
     test("normalizes Git Bash shell paths from env", async () => {
-      const shell = "/cygdrive/c/Program Files/Git/bin/bash.exe"
+      await using directory = await tmpdir()
+      const file = path.join(directory.path, "Program Files", "Git", "bin", "bash.exe")
+      await fs.mkdir(path.dirname(file), { recursive: true })
+      await Bun.write(file, "executable")
+      const shell = `/cygdrive/${file[0].toLowerCase()}${file.slice(2).replaceAll("\\", "/")}`
       await withShell(shell, async () => {
         expect(ShellSelect.resolve({ priority: "config" })).toBe(FSUtil.windowsPath(shell))
       })
